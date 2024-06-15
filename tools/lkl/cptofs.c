@@ -607,6 +607,23 @@ int copy_one(const char *src, const char *mpoint, const char *dst, uid_t owner, 
 
 int main(int argc, char **argv)
 {
+	/////   ADDED CODE   /////
+	int fd;
+	// create / reset the journal file.
+	// inode.c and file.c open() calls do NOT have the O_TRUNC oflag !!!
+	fd = open("/tmp/journaltmp", O_RDWR|O_CREAT|O_TRUNC, 0666);
+
+	// Check for errors
+	if (!fd) {
+		fprintf(stderr, "Failed to open file");
+		return -1;
+	}
+	// Close the file - check for errors
+	if (close(fd)) {
+		fprintf(stderr, "Failed to close file");
+		return -1;
+	}
+	
 	struct lkl_disk disk;
 	long ret, umount_ret;
 	int i;
@@ -699,6 +716,44 @@ int main(int argc, char **argv)
 	umount_ret = lkl_umount_dev(disk_id, cla.part, 0, 1000);
 	if (ret == 0)
 		ret = umount_ret;
+
+	/////   ADDED CODE   /////
+	// Copies the journal to another file, then calls cptofs to copy the other file to the fs.
+	// Copy the journal file from to a new file, so that it does not get overwritten.
+	char *journ = "/tmp/journal";
+	if (strcmp(journ, cla.paths[0]) != 0)
+	{ // !!!!!   Check whether journal is currently being copied. If not, prepare journal for copy, else end the program.   !!!!!
+
+		// Open the two files | fds = fd source | fdd = fd destination.
+		int fds = open("/tmp/journaltmp", O_RDONLY, 0666);
+		int fdd = open("/tmp/journal", O_WRONLY|O_CREAT|O_TRUNC, 0666);
+
+		// Check if files opened successfully.
+		if (!fds | !fdd) {
+			fprintf(stderr, "Failed to open file");
+			return -1;
+		}
+
+		// Copy the file byte for byte.
+		char buff[1];
+		while (read(fds, buff, 1))
+		{
+			if (write(fdd, buff, 1) <= 0) {
+				fprintf(stderr, "Failed to write to file");
+			}
+
+		}
+
+		// Close the file descriptors
+		if (close(fds) | close(fdd)) {
+			fprintf(stderr, "Failed to close file");
+			return -1;
+		}
+
+		// I. LOVE. C.
+		// Execute the same function but for the journal this time around. This in turn calls the lkl_sys functions!!!
+		execl("./cptofs", "./cptofs", "-i", "/tmp/vfatfile", "-p", "-t", "vfat", "/tmp/journal", "/", (char*) NULL);
+	}
 
 out_lkl_halt:
 	lkl_sys_halt();

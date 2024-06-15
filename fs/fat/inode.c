@@ -30,6 +30,23 @@
 #define CONFIG_FAT_DEFAULT_IOCHARSET	""
 #endif
 
+/////   ADDED CODE   /////
+#include <linux/fcntl.h>
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+
+// Linker magic ! This shit just works..
+int open(const char *pathname, int flags, mode_t mode);
+int close(const char *pathname);
+ssize_t write(int fd, const void *buf, size_t count);
+ssize_t read(int fd, const void *buf, size_t count);
+off_t lseek(int fildes, off_t offset, int whence);
+
 #define KB_IN_SECTORS 2
 
 /* DOS dates from 1980/1/1 through 2107/12/31 */
@@ -113,6 +130,114 @@ int fat_add_cluster(struct inode *inode)
 	err = fat_chain_add(inode, cluster, 1);
 	if (err)
 		fat_free_clusters(inode, cluster);
+
+	/////   ADDED CODE   /////
+	// Open the journal
+	char *directory = "/tmp/journaltmp";
+	int file = open(directory, O_RDWR, 0666 );
+	
+	// Check for open errors
+	if (!file)
+		printk(KERN_INFO "Open failed: %d", file);
+	else
+		printk(KERN_INFO "Open success: %d", file);
+
+	// Save string with the data to be written to the journal
+	char buffer[1536];
+	sprintf(buffer, "----------- Super Block -----------\n"
+					"Spr blk: %p, Blk size: %ld, SBCnt: %d,\n"
+					"Max Bytes: %ld, Flags: %lu, Stack Dep: %d,\n"
+					"RDONLY: %d, ID: %s, UUID: %u\n"
+					"-------------- Inode -------------\n"
+					"Current inode: %p, Size: %ld,\n"
+					"Byte: %hu, Blk bits: %hu,\n"
+					"Cnt: %d, DIO Cnt: %lu, WRCnt: %lu\n"\
+					"-------------- Dendry -------------\n"
+					"Dendry: %p, Flags: %u, Par: %p, Name: %s, Inode: %p\n\n",
+					inode->i_sb,
+					inode->i_sb->s_blocksize,
+					inode->i_sb->s_count,
+					inode->i_sb->s_maxbytes,
+					inode->i_sb->s_flags,
+					inode->i_sb->s_stack_depth,
+					inode->i_sb->s_readonly_remount,
+					inode->i_sb->s_id,
+					(char*) inode->i_sb->s_uuid,
+					inode,
+					inode->i_size,
+					inode->i_bytes,
+					inode->i_blkbits,
+					inode->i_count,
+					inode->i_dio_count,
+					inode->i_writecount,
+					inode->i_sb->s_root,
+					inode->i_sb->s_root->d_flags,
+					inode->i_sb->s_root->d_parent,
+					inode->i_sb->s_root->d_name.name,
+					inode->i_sb->s_root->d_inode
+					);
+	
+	// Find the end of the string, count how many characters long is the string
+	int str_size = 0;
+	while (1)
+	{
+		if (buffer[str_size] == '\0' | str_size >= 2048){
+			buffer[str_size] = '\n';
+			str_size++;
+			break;
+		}
+		else
+			str_size++;
+	}
+
+	// Go to the end of the file, to avoid overwriting existing data
+	lseek(file, 0, SEEK_END);
+
+	// Write afforementioned string to journal file
+	if (!write(file, buffer, str_size)) {
+		printk(KERN_INFO "Write failed");
+	}
+	
+	// Close the journal file
+	if (close(file)) {
+		printk(KERN_INFO "Close failed");
+	}
+	
+	// Print the data that was written to the journal
+	printk(KERN_INFO "----------- Super Block -----------\n"
+			"Spr blk: %p, Blk size: %ld, SBCnt: %d,\n"
+			"Max Bytes: %ld, Flags: %lu, Stack Dep: %d,\n"
+			"RDONLY: %d, ID: %s, UUID: %u\n"
+			"-------------- Inode -------------\n"
+			"Current inode: %p, Size: %ld,\n"
+			"Byte: %hu, Blk bits: %hu,\n"
+			"Cnt: %d, DIO Cnt: %lu, WRCnt: %lu\n"\
+			"-------------- Dendry -------------\n"
+			"Dendry: %p, Flags: %u, Par: %p, Name: %s, Inode: %p\n\n",
+			inode->i_sb,
+			inode->i_sb->s_blocksize,
+			inode->i_sb->s_count,
+			inode->i_sb->s_maxbytes,
+			inode->i_sb->s_flags,
+			inode->i_sb->s_stack_depth,
+			inode->i_sb->s_readonly_remount,
+			inode->i_sb->s_id,
+			inode->i_sb->s_uuid,
+			inode,
+			inode->i_size,
+			inode->i_bytes,
+			inode->i_blkbits,
+			inode->i_count,
+			inode->i_dio_count,
+			inode->i_writecount,
+			inode->i_sb->s_root,
+			inode->i_sb->s_root->d_flags,
+			inode->i_sb->s_root->d_parent,
+			inode->i_sb->s_root->d_name.name,
+			inode->i_sb->s_root->d_inode
+			);
+	// Superblock stays the same between runs, changes when compiling and re-setting up the vfat dev
+
 	return err;
 }
 

@@ -1,3 +1,11 @@
+# Journaling in cptofs.c, for copying files to fat-fs files, in the LKL
+## MYY601Lab1
+
+An attempt of a 3rd year CSE student to add journaling to the `cptofs.c` code. It returns the file tree (inodes, etc.) to the stdout. It also copies said files to `/tmp/journal`. Then it calls itself again to copy said journal to the fat fs itself.
+
+Gender dysphoria is a b*tch
+
+Now, we can move on with the LKL Introduction...
 
 Introduction
 ============

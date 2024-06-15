@@ -18,6 +18,24 @@
 #include <linux/falloc.h>
 #include "fat.h"
 
+
+/////   ADDED CODE   /////
+#include <linux/fcntl.h>
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+
+// Linker magic ! It just fucking works...
+int open(const char *pathname, int flags, mode_t mode);
+int close(const char *pathname);
+ssize_t write(int fd, const void *buf, size_t count);
+ssize_t read(int fd, const void *buf, size_t count);
+off_t lseek(int fildes, off_t offset, int whence);
+
 static long fat_fallocate(struct file *file, int mode,
 			  loff_t offset, loff_t len);
 
@@ -174,6 +192,82 @@ long fat_generic_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 static int fat_file_release(struct inode *inode, struct file *filp)
 {
+	/////   ADDED CODE   /////
+	// Open the journal
+	char *directory = "/tmp/journaltmp";
+	int file = open(directory, O_RDWR, 0666 );
+	
+	// Check for open errors
+	if (!file)
+		printk(KERN_INFO "Open failed: %d", file);
+	else
+		printk(KERN_INFO "Open success: %d", file);
+	
+	// Save string with the data to be written to the journal
+	char buffer[1536];
+	sprintf(buffer, "----------- File ------------\n"
+					"Inode: %p, Path Dentry: %p, Path Mnt: %p,\n"
+					"Mnt SB: %p, Mnt Dentry: %p, Flags: %u"
+					"Mode: %u, POS: %lld, Mapping: %p"
+					"Mapping Writable: %lu, Mapping NRPages: %lu\n\n",
+					filp->f_inode,
+					filp->f_path.dentry,
+					filp->f_path.mnt,
+					filp->f_path.mnt->mnt_sb,
+					filp->f_path.mnt->mnt_root,
+					filp->f_flags,
+					filp->f_mode,
+					filp->f_pos,
+					filp->f_mapping,
+					filp->f_mapping->i_mmap_writable,
+					filp->f_mapping->nrpages
+					);
+	
+	// Find the end of the string, count how many characters long is the string
+	int str_size = 0;
+	while (1)
+	{
+		if (buffer[str_size] == '\0' | str_size >= 2048){
+			buffer[str_size] = '\n';
+			str_size++;
+			break;
+		}
+		else
+			str_size++;
+	}
+
+	// Go to the end of the file, to avoid overwriting existing data
+	lseek(file, 0, SEEK_END);
+
+	// Write afforementioned string to journal file
+	if (!write(file, buffer, str_size)) {
+		printk(KERN_INFO "Write failed");
+	}
+	
+	// Close the journal file
+	if (close(file)) {
+		printk(KERN_INFO "Close failed");
+	}
+
+	// Print the data that was written to the journal
+	printk(KERN_INFO 	"----------- File ------------\n"
+						"Inode: %p, Path Dentry: %p, Path Mnt: %p,\n"
+						"Mnt SB: %p, Mnt Dentry: %p, Flags: %u"
+						"Mode: %u, POS: %lld, Mapping: %p"
+						"Mapping Writable: %lu, Mapping NRPages: %lu\n\n",
+						filp->f_inode,
+						filp->f_path.dentry,
+						filp->f_path.mnt,
+						filp->f_path.mnt->mnt_sb,
+						filp->f_path.mnt->mnt_root,
+						filp->f_flags,
+						filp->f_mode,
+						filp->f_pos,
+						filp->f_mapping,
+						filp->f_mapping->i_mmap_writable,
+						filp->f_mapping->nrpages
+						);
+
 	if ((filp->f_mode & FMODE_WRITE) &&
 	    MSDOS_SB(inode->i_sb)->options.flush) {
 		fat_flush_inodes(inode->i_sb, inode, NULL);
